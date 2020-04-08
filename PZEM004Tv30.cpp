@@ -1,3 +1,9 @@
+/*
+Various changes noted in the comments below.
+
+Marcelo C. Picoli, 2019-09-04
+*/
+
 #include "PZEM004Tv30.h"
 #include <stdio.h>
 
@@ -25,20 +31,20 @@
 #define UPDATE_TIME     200
 
 #define RESPONSE_SIZE 32
-#define READ_TIMEOUT 100
+#define READ_TIMEOUT 200
 
 #define PZEM_BAUD_RATE 9600
 
 extern HardwareSerial Serial;
 
-
-
 #define DEBUG
 
 // Debugging function;
-void printBuf(uint8_t* buffer, uint16_t len){
+void printBuf(uint8_t* buffer, uint16_t len)
+{
 #ifdef DEBUG
-    for(uint16_t i = 0; i < len; i++){
+    for(uint16_t i = 0; i < len; i++)
+	{
         char temp[6];
         sprintf(temp, "%.2x ", buffer[i]);
         Serial.print(temp);
@@ -48,6 +54,7 @@ void printBuf(uint8_t* buffer, uint16_t len){
 #endif
 }
 
+#ifdef PZEM004_SOFTSERIAL
 /*!
  * PZEM004Tv30::PZEM004Tv30
  *
@@ -59,12 +66,22 @@ void printBuf(uint8_t* buffer, uint16_t len){
 */
 PZEM004Tv30::PZEM004Tv30(uint8_t receivePin, uint8_t transmitPin, uint8_t addr)
 {
-    SoftwareSerial *port = new SoftwareSerial(receivePin, transmitPin);
-    port->begin(PZEM_BAUD_RATE);
+	#if defined(ESP32) || defined(ESP8266)
+		// ESPSoftwareSerial required, version 5.2.8 or above, has different constructors.
+		// For the ESP32 it may require v1.0.3-rc1 or above of the board package
+		SoftwareSerial *port = new SoftwareSerial();
+		port->begin(PZEM_BAUD_RATE, SWSERIAL_8N1, receivePin, transmitPin);
+	#else
+		// Arduino, etc
+		SoftwareSerial *port = new SoftwareSerial(receivePin, transmitPin);
+		port->begin(PZEM_BAUD_RATE);
+	#endif
+	
     this->_serial = port;
     this->_isSoft = true;
     init(addr);
 }
+#endif
 
 /*!
  * PZEM004Tv30::PZEM004Tv30
@@ -82,6 +99,24 @@ PZEM004Tv30::PZEM004Tv30(HardwareSerial* port, uint8_t addr)
     init(addr);
 }
 
+#if defined(ESP32)
+/*!
+ * PZEM004Tv30::PZEM004Tv30
+ *
+ * Hardware serial constructor with pin relocation (ESP32 specific)
+ *
+ * @param port Hardware serial to use
+ * @param addr Slave address of device
+*/
+PZEM004Tv30::PZEM004Tv30(HardwareSerial* port, uint8_t receivePin, uint8_t transmitPin, uint8_t addr)
+{
+    port->begin(PZEM_BAUD_RATE, SERIAL_8N1, receivePin, transmitPin);
+    this->_serial = port;
+    this->_isSoft = false;
+    init(addr);
+}
+#endif
+
 /*!
  * PZEM004Tv30::~PZEM004Tv30
  *
@@ -91,7 +126,9 @@ PZEM004Tv30::PZEM004Tv30(HardwareSerial* port, uint8_t addr)
 PZEM004Tv30::~PZEM004Tv30()
 {
     if(_isSoft)
+	{
         delete this->_serial;
+	}
 }
 
 /*!
@@ -103,8 +140,12 @@ PZEM004Tv30::~PZEM004Tv30()
 */
 float PZEM004Tv30::voltage()
 {
-    if(!updateValues()) // Update vales if necessary
+	// Update vales if necessary
+	// (At most, once every UPDATE_TIME milisseconds)
+    if(!updateValues())
+	{
         return NAN; // Update did not work, return NAN
+	}
 
     return _currentValues.voltage;
 }
@@ -118,8 +159,10 @@ float PZEM004Tv30::voltage()
 */
 float PZEM004Tv30::current()
 {
-    if(!updateValues())// Update vales if necessary
-        return NAN; // Update did not work, return NAN
+    if(!updateValues())
+	{
+		return NAN;
+	}
 
     return _currentValues.current;
 }
@@ -133,8 +176,10 @@ float PZEM004Tv30::current()
 */
 float PZEM004Tv30::power()
 {
-    if(!updateValues()) // Update vales if necessary
-        return NAN; // Update did not work, return NAN
+    if(!updateValues())
+	{
+        return NAN;
+	}
 
     return _currentValues.power;
 }
@@ -148,8 +193,10 @@ float PZEM004Tv30::power()
 */
 float PZEM004Tv30::energy()
 {
-    if(!updateValues()) // Update vales if necessary
-        return NAN; // Update did not work, return NAN
+    if(!updateValues())
+	{
+        return NAN;
+	}
 
     return _currentValues.energy;
 }
@@ -163,8 +210,10 @@ float PZEM004Tv30::energy()
 */
 float PZEM004Tv30::frequency()
 {
-    if(!updateValues()) // Update vales if necessary
-        return NAN; // Update did not work, return NAN
+    if(!updateValues())
+	{
+        return NAN;
+	}
 
     return _currentValues.frequeny;
 }
@@ -175,11 +224,31 @@ float PZEM004Tv30::frequency()
  * Get power factor of load
  *
  * @return load power factor
+ * @deprecated Use powerFactor() instead.
 */
 float PZEM004Tv30::pf()
 {
-    if(!updateValues()) // Update vales if necessary
-        return NAN; // Update did not work, return NAN
+    if(!updateValues())
+	{
+        return NAN;
+	}
+
+    return _currentValues.pf;
+}
+
+/*!
+ * PZEM004Tv30::powerFactor
+ *
+ * Get power factor of load
+ *
+ * @return load power factor
+*/
+float PZEM004Tv30::powerFactor()
+{
+    if(!updateValues())
+	{
+        return NAN;
+	}
 
     return _currentValues.pf;
 }
@@ -196,7 +265,8 @@ float PZEM004Tv30::pf()
  *
  * @return success
 */
-bool PZEM004Tv30::sendCmd8(uint8_t cmd, uint16_t rAddr, uint16_t val, bool check){
+bool PZEM004Tv30::sendCmd8(uint8_t cmd, uint16_t rAddr, uint16_t val, bool check)
+{
     uint8_t sendBuffer[8]; // Send buffer
     uint8_t respBuffer[8]; // Response buffer (only used when check is true)
 
@@ -211,10 +281,11 @@ bool PZEM004Tv30::sendCmd8(uint8_t cmd, uint16_t rAddr, uint16_t val, bool check
 
     setCRC(sendBuffer, 8);                   // Set CRC of frame
 
-    _serial->write(sendBuffer, 8); // send frame
+    _serial->write(sendBuffer, 8); 			 // send frame
+	_serial->flush();						 // Aparentemente necessário para instâncias de serial por software.
 
     if(check) {
-        if(!recieve(respBuffer, 8)){ // if check enabled, read the response
+        if(!receive(respBuffer, 8)){ // if check enabled, read the response
             return false;
         }
 
@@ -241,16 +312,45 @@ bool PZEM004Tv30::sendCmd8(uint8_t cmd, uint16_t rAddr, uint16_t val, bool check
 */
 bool PZEM004Tv30::setAddress(uint8_t addr)
 {
-    if(addr < 0x01 || addr > 0xF7) // sanity check
+    if(addr < 0x01 || addr > 0xF7)
+	{
         return false;
+	}
 
     // Write the new address to the address register
     if(!sendCmd8(CMD_WSR, WREG_ADDR, addr, true))
+	{
         return false;
+	}
 
     _addr = addr; // If successful, update the current slave address
 
     return true;
+}
+
+/*!
+ * PZEM004Tv30::setSlaveAddress
+ *
+ * Selects an slave address from the valid range. This address will be used in all
+ * subsequent calls to various methods. Allows reuse of the same instance of PZEM004Tv30
+ * for accessing multiple devices connected to the same physical interface.
+ *
+ * For use ONLY in multi-slave scenarios, since once an address is set, it wont accept the 
+ * generic (0xF8) address that all units answer to.
+ *
+ * @param[in] addr New slave address in the range 0x01-0xF7
+ *
+ * @return success
+*/
+bool PZEM004Tv30::setSlaveAddress(uint8_t addr)
+{
+	if(addr < 0x01 || addr > 0xF7)
+	{
+		return false;
+	}
+	
+	init(addr);
+	return true;
 }
 
 /*!
@@ -276,13 +376,17 @@ uint8_t PZEM004Tv30::getAddress()
 */
 bool PZEM004Tv30::setPowerAlarm(uint16_t watts)
 {
-    if (watts > 25000){ // Sanitych check
+	// Sanity check
+    if (watts > 25000)
+	{
         watts = 25000;
     }
 
     // Write the watts threshold to the Alarm register
     if(!sendCmd8(CMD_WSR, WREG_ALARM_THR, watts, true))
+	{
         return false;
+	}
 
     return true;
 }
@@ -297,8 +401,10 @@ bool PZEM004Tv30::setPowerAlarm(uint16_t watts)
 */
 bool PZEM004Tv30::getPowerAlarm()
 {
-    if(!updateValues()) // Update vales if necessary
-        return NAN; // Update did not work, return NAN
+    if(!updateValues())
+	{
+        return NAN;
+	}
 
     return _currentValues.alarms != 0x0000;
 }
@@ -312,9 +418,13 @@ bool PZEM004Tv30::getPowerAlarm()
  *
  * @return success
 */
-void PZEM004Tv30::init(uint8_t addr){
-    if(addr < 0x01 || addr > 0xF8) // Sanity check of address
+void PZEM004Tv30::init(uint8_t addr)
+{
+    if(addr < 0x01 || addr > 0xF8)
+	{
         addr = PZEM_DEFAULT_ADDR;
+	}
+	
     _addr = addr;
 
     // Set initial lastRed time so that we read right away
@@ -332,23 +442,26 @@ void PZEM004Tv30::init(uint8_t addr){
 */
 bool PZEM004Tv30::updateValues()
 {
-    //static uint8_t buffer[] = {0x00, CMD_RIR, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00};
     static uint8_t response[25];
 
-    // If we read before the update time limit, do not update
-    if(_lastRead + UPDATE_TIME > millis()){
+    // If we read more than once before the update time limit, do not update
+    if(_lastRead + UPDATE_TIME > millis())
+	{
         return true;
     }
 
     // Read 10 registers starting at 0x00 (no check)
     sendCmd8(CMD_RIR, 0x00, 0x0A, false);
 
-
-    if(recieve(response, 25) != 25){ // Something went wrong
+	uint8_t n = receive(response, 25);
+	
+    if(n != 25)
+	{
+		#ifdef DEBUG
+		Serial.println("Something went wrong. Got " + String(n) + " bytes, expected 25");
+		#endif
         return false;
     }
-
-
 
     // Update the current values
     _currentValues.voltage = ((uint32_t)response[3] << 8 | // Raw voltage in 0.1V
@@ -392,7 +505,8 @@ bool PZEM004Tv30::updateValues()
  *
  * @return success
 */
-bool PZEM004Tv30::resetEnergy(){
+bool PZEM004Tv30::resetEnergy()
+{
     uint8_t buffer[] = {0x00, CMD_REST, 0x00, 0x00};
     uint8_t reply[5];
     buffer[0] = _addr;
@@ -400,9 +514,10 @@ bool PZEM004Tv30::resetEnergy(){
     setCRC(buffer, 4);
     _serial->write(buffer, 4);
 
-    uint16_t length = recieve(reply, 5);
+    uint16_t length = receive(reply, 5);
 
-    if(length == 0 || length == 5){
+    if(length == 0 || length == 5)
+	{
         return false;
     }
 
@@ -410,7 +525,7 @@ bool PZEM004Tv30::resetEnergy(){
 }
 
 /*!
- * PZEM004Tv30::recieve
+ * PZEM004Tv30::receive
  *
  * Receive data from serial with buffer limit and timeout
  *
@@ -419,32 +534,57 @@ bool PZEM004Tv30::resetEnergy(){
  *
  * @return number of bytes read
 */
-uint16_t PZEM004Tv30::recieve(uint8_t *resp, uint16_t len)
+uint16_t PZEM004Tv30::receive(uint8_t *resp, uint16_t len)
 {
     #ifdef PZEM004_SOFTSERIAL
         if(_isSoft)
-            ((SoftwareSerial *)_serial)->listen(); // Start software serial listen
+		{
+			// Start software serial listen
+			// There may be more than one instance of SoftwareSerial, system-wide, but only one may be listening at once.
+			// Be aware that any others will not be listening after this call
+            ((SoftwareSerial *)_serial)->listen();
+		}
     #endif
 
-    unsigned long startTime = millis(); // Start time for Timeout
-    uint8_t index = 0; // Bytes we have read
+    unsigned long startTime = millis();				// Start time for Timeout
+    uint8_t index = 0;								// Bytes we have read
+
     while((index < len) && (millis() - startTime < READ_TIMEOUT))
     {
-        if(_serial->available() > 0)
+        while(_serial->available() > 0)
         {
             uint8_t c = (uint8_t)_serial->read();
 
-            resp[index++] = c;
+			if (index < len)
+			{
+				resp[index++] = c;
+				#ifdef DEBUG
+				Serial.print(c, HEX);Serial.print("|");
+				#endif
+			}
         }
-        yield();	// do background netw tasks while blocked for IO (prevents ESP watchdog trigger)
+		
+        yield();	// do background tasks while blocked for IO (prevents ESP watchdog trigger)
     }
 
-    // Check CRC with the number of bytes read
-    if(!checkCRC(resp, index)){
-        return 0;
-    }
+	#ifdef DEBUG
+	if ((millis() - startTime >= READ_TIMEOUT))
+	{
+		// Not necessarily an error, specially for variable-lenght responses smaller than the maximum expected.
+		Serial.println("Timeout reached");
+	}
+	#endif
 
-    return index;
+	// Check CRC with the number of bytes read
+	if(!checkCRC(resp, index))
+	{
+		#ifdef DEBUG
+			Serial.println("CRC mismatch");
+		#endif
+		return 0;
+	}
+
+	return index;
 }
 
 /*!
@@ -457,9 +597,13 @@ uint16_t PZEM004Tv30::recieve(uint8_t *resp, uint16_t len)
  *
  * @return is the buffer check sum valid
 */
-bool PZEM004Tv30::checkCRC(const uint8_t *buf, uint16_t len){
-    if(len <= 2) // Sanity check
+bool PZEM004Tv30::checkCRC(const uint8_t *buf, uint16_t len)
+{
+    // Sanity check (the smallest message is one byte plus the CRC)
+	if(len <= 2)
+	{
         return false;
+	}
 
     uint16_t crc = CRC16(buf, len - 2); // Compute CRC of data
     return ((uint16_t)buf[len-2]  | (uint16_t)buf[len-1] << 8) == crc;
@@ -476,9 +620,12 @@ bool PZEM004Tv30::checkCRC(const uint8_t *buf, uint16_t len){
  * @param[in] len  Length of the respBuffer including 2 bytes for CRC
  *
 */
-void PZEM004Tv30::setCRC(uint8_t *buf, uint16_t len){
-    if(len <= 2) // Sanity check
+void PZEM004Tv30::setCRC(uint8_t *buf, uint16_t len)
+{
+    if(len <= 2)
+	{
         return;
+	}
 
     uint16_t crc = CRC16(buf, len - 2); // CRC of data
 
@@ -502,7 +649,7 @@ void PZEM004Tv30::setCRC(uint8_t *buf, uint16_t len){
 uint16_t PZEM004Tv30::CRC16(const uint8_t *data, uint16_t len)
 {
     // Pre computed CRC table
-    static const uint16_t crcTable[] = {
+    static const PROGMEM uint16_t crcTable[] = {
         0X0000, 0XC0C1, 0XC181, 0X0140, 0XC301, 0X03C0, 0X0280, 0XC241,
         0XC601, 0X06C0, 0X0780, 0XC741, 0X0500, 0XC5C1, 0XC481, 0X0440,
         0XCC01, 0X0CC0, 0X0D80, 0XCD41, 0X0F00, 0XCFC1, 0XCE81, 0X0E40,
@@ -545,5 +692,6 @@ uint16_t PZEM004Tv30::CRC16(const uint8_t *data, uint16_t len)
         crc >>= 8;
         crc ^= crcTable[nTemp];
     }
+	
     return crc;
 }
